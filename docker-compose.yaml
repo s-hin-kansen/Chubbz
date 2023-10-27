@@ -1,0 +1,29 @@
+version: '3'
+services:
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - NODE_ID=2
+    ports:
+      - "8080:8080"
+
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - NODE_ID=1
+    depends_on:
+      - node2
+
+  client1:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - LEADER_ADDRESS=node2:8080
+    depends_on:
+      - node1
+      - node2
