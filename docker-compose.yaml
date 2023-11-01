@@ -25,6 +25,7 @@ services:
     environment:
       - NODE_ID=1
       - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
     depends_on:
       - node1
       - node2
@@ -36,6 +37,8 @@ services:
     environment:
       - NODE_ID=2
       - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+
     depends_on:
       - node1
       - node2

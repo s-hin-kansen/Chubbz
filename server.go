@@ -51,7 +51,7 @@ func (n *Node) HandleRequest(arg *Message, reply *string) error {
 			dataLock.Lock()
 			data.Queue = append(data.Queue, IDs{arg.ClientID, arg.RequestID})
 			dataLock.Unlock()
-			*reply = "LOCKED" 
+			*reply = "LOCKED"
 		} else {
 			// New request
 			fmt.Println("leader Received request")
@@ -76,7 +76,7 @@ func (n *Node) HandleRequest(arg *Message, reply *string) error {
 		} else {
 			*reply = "Release not permitted without lock"
 		}
-		
+
 	}
 	// fmt.Printf("Leader Data: %+v\n", data)
 	return nil

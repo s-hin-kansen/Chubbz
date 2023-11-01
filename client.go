@@ -26,20 +26,21 @@ func SendRequest(client *rpc.Client) {
 	err = client.Call("Node.HandleRequest", &message, &reply)
 	if err != nil {
 		log.Fatal(err)
+		log.Println("Error connecting to Server. Trying to connect to Backup Server")
+		go contactBackup()
 	}
-	fmt.Println("Received:", reply)
-	if reply == "LOCKED" {
-		// TODO: retry indefinitely?
+	// fmt.Println("Received:", reply)
+	// if reply == "LOCKED" {
+	// 	// TODO: retry indefinitely?
 
-		// IGNORE: Below is for debug of RequestID
-		time.Sleep(6 * time.Second)
-		err = client.Call("Node.HandleRequest", &message, &reply)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("Received:", reply)
-		// END debug
-	}
+	// 	// IGNORE: Below is for debug of RequestID
+	// 	time.Sleep(6 * time.Second)
+	// 	err = client.Call("Node.HandleRequest", &message, &reply)
+	// 	if err != nil {
+	// 		log.Fatal(err)
+	// 	}
+	// 	fmt.Println("Received:", reply)
+	// 	// END debug
 }
 
 func RequestLock(client *rpc.Client, nodeID string) {
@@ -48,7 +49,7 @@ func RequestLock(client *rpc.Client, nodeID string) {
 
 	message.Body = "REQUEST"
 	message.RequestID = 1
-	fmt.Println("Client", nodeID,"sent Request", message.RequestID,"for lock")
+	fmt.Println("Client", nodeID, "sent Request", message.RequestID, "for lock")
 	SendRequest(client)
 	// err = client.Call("Node.HandleRequest", &message, &reply)
 	// if err != nil {
@@ -60,7 +61,7 @@ func RequestLock(client *rpc.Client, nodeID string) {
 	time.Sleep(time.Second)
 
 	message.Body = "RELEASE"
-	fmt.Println("Client", nodeID,"sent Release lock")
+	fmt.Println("Client", nodeID, "sent Release lock")
 	SendRequest(client)
 
 	// err = client.Call("Node.HandleRequest", &message, &reply)
@@ -73,13 +74,13 @@ func RequestLock(client *rpc.Client, nodeID string) {
 
 	message.Body = "REQUEST"
 	message.RequestID += 1
-	fmt.Println("Client", nodeID,"sent Request", message.RequestID,"for lock")
+	fmt.Println("Client", nodeID, "sent Request", message.RequestID, "for lock")
 	SendRequest(client)
 
 	time.Sleep(time.Second)
 
 	message.Body = "RELEASE"
-	fmt.Println("Client", nodeID,"sent Release lock")
+	fmt.Println("Client", nodeID, "sent Release lock")
 	SendRequest(client)
 }
 
@@ -91,7 +92,20 @@ func contactServer() {
 		log.Fatal("Failed to connect to leader:", err)
 	}
 	defer client.Close()
-	fmt.Println("Client", nodeID,"connected to server")
+	fmt.Println("Client", nodeID, "connected to server")
+	go RequestLock(client, nodeID)
+	time.Sleep(30 * time.Second)
+}
+
+func contactBackup() {
+	nodeID := os.Getenv("NODE_ID")
+	backupAddress := os.Getenv("BACKUP_ADDRESS") // Assume the format is "node2:8080"
+	client, err := rpc.Dial("tcp", backupAddress)
+	if err != nil {
+		log.Fatal("Failed to connect to backup  server:", err)
+	}
+	defer client.Close()
+	fmt.Println("Client", nodeID, "connected to backup server")
 	go RequestLock(client, nodeID)
 	time.Sleep(30 * time.Second)
 }
