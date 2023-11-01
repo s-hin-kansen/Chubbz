@@ -66,6 +66,7 @@ func (n *Node) HandleRequest(arg *Message, reply *string) error {
 		if data.ClientID == arg.ClientID && data.RequestID == arg.RequestID {
 			dataLock.Lock()
 			data.ClientID = "0"
+			data.RequestID = 0
 			if len(data.Queue) > 0 {
 				data.ClientID = data.Queue[0].ClientID
 				data.RequestID = data.Queue[0].RequestID
