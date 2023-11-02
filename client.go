@@ -28,18 +28,24 @@ func SendRequest(client *rpc.Client) {
 		log.Println("Error connecting to Server. Trying to connect to Backup Server")
 		go contactBackup()
 	}
-	// fmt.Println("Received:", reply)
-	// if reply == "LOCKED" {
-	// 	// TODO: retry indefinitely?
+	fmt.Println("Received:", reply)
+	if reply == "LOCKED" {
+		// TODO: retry indefinitely?
 
-	// 	// IGNORE: Below is for debug of RequestID
-	// 	time.Sleep(6 * time.Second)
-	// 	err = client.Call("Node.HandleRequest", &message, &reply)
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// 	fmt.Println("Received:", reply)
-	// 	// END debug
+		// IGNORE: Below is for debug of RequestID, retries indefinitely
+		for {
+			time.Sleep(3 * time.Second)
+			err = client.Call("Node.HandleRequest", &message, &reply)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("Received:", reply)
+			if reply != "LOCKED" {
+				break
+			}
+		}
+		// END debug
+	}
 }
 
 func RequestLock(client *rpc.Client, nodeID string) {
