@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY . .
 
-RUN go build -o app ./server.go
+RUN go build -o app ./server/server.go
 
 CMD ["./app"]
