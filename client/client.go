@@ -73,10 +73,10 @@ func SendRequest(requestCount int, requestType MessageType, requestID int) {
 
 	// Set message fields
 	message.Request.RequestID = requestID
+	message.Request.ClientID = nodeID
 	message.MessageType = requestType
 
 	// Dial server
-	nodeID, _ = strconv.Atoi(os.Getenv("NODE_ID"))
 	leaderAddress := os.Getenv(leader) // Assume the format is "node2:8080"
 	client, err := rpc.Dial("tcp", leaderAddress)
 	if err != nil {
@@ -273,6 +273,7 @@ func handleServerMessage(conn net.Conn, receivedEnter *bool) {
 // }
 
 func main() {
+	nodeID, _ = strconv.Atoi(os.Getenv("NODE_ID"))
 	// Wait for server goroutines to initialise
 	time.Sleep(7 * time.Second)
 
