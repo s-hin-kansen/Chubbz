@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -35,6 +34,23 @@ const (
 	WAIT                                // for server to tell client to wait
 	OK_ENTER                            // for server to signal to client to enter cs
 )
+
+func (cmt ClientMessageType) String() string {
+	switch cmt {
+	case REQUEST:
+			return "REQUEST"
+	case RELEASE:
+			return "RELEASE"
+	case OK_RELEASE:
+			return "OK_RELEASE"
+	case WAIT:
+			return "WAIT"
+	case OK_ENTER:
+		return "OK_ENTER"
+	default:
+			return "Unknown"
+	}
+}
 
 type ClientMessage struct {
 	ClientMessageType ClientMessageType
@@ -81,9 +97,10 @@ var (
 type Node int
 
 // For Leader to handle requests from clients
-func (n *Node) HandleClientMessage(arg *ClientMessage, reply *ClientMessage) error {
+func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error {
+	fmt.Printf("Leader received %+v: from Client %d\n", arg.ClientMessageType.String(), arg.Request.ClientID)
 	switch arg.ClientMessageType {
-	// TODO: This request should take in types of REQUEST and RELEASE
+	// This request should take in types of REQUEST and RELEASE
 	// In doing so, it should also reply to the client either OK_RELEASE, WAIT, OK_ENTER
 	case REQUEST:
 
@@ -100,32 +117,57 @@ func (n *Node) HandleClientMessage(arg *ClientMessage, reply *ClientMessage) err
 				4.2. WAIT
 		*/
 
-		// Add client to queue
-		dataLock.Lock()
-		data.Queue = append(data.Queue, Request{arg.Request.ClientID, arg.Request.RequestID})
-		dataLock.Unlock()
-		*reply = "LOCKED"
+		req := arg.Request // get the client request
 
-		// Handle case where there is a lock assigned to the client requesting again (this handles case )
-		if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
-			// Serve re-request
-			fmt.Println("Leader serving request from queue")
-			*reply = "OK Rerequest"
-		} else if data.ClientID != 0 {
-			// Add client to queue
+		nonActive := Request{0, 0} // handle the trivial case when theres no active client at all
+		if data.ActiveClient == nonActive {
+			// set ActiveClient to the request
 			dataLock.Lock()
-			data.Queue = append(data.Queue, Request{arg.ClientID, arg.RequestID})
+			data.ActiveClient = req
 			dataLock.Unlock()
-			*reply = "LOCKED"
+			// replicate leader data to slave
+			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+			// reply to client OK_ENTER - TODO: NOTE client side currently does not handle this, can possibly ask client side to help upgrade, or else for now we will send 2x OK_ENTER	in 2 diff ways since the client does support the PATCH below
+			*reply = OK_ENTER
+			// PATCH we hope to rmv this send OK_ENTER by the send one way msg way. but note still need to use the one way msg function upon dequeuing active client and telling next client in queue to OK_ENTER
+			//n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
 		} else {
-			// New request
-			fmt.Println("leader Received request")
+			// add to queue
 			dataLock.Lock()
-			data.ClientID = arg.ClientID
-			data.RequestID = arg.RequestID
+			data.Queue = append(data.Queue, req)
 			dataLock.Unlock()
-			*reply = "OK New request"
+			// replicate leader data to slave
+			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+			// reply to client WAIT
+			*reply = WAIT
 		}
+
+		// // Add client to queue
+		// dataLock.Lock()
+		// data.Queue = append(data.Queue, Request{arg.Request.ClientID, arg.Request.RequestID})
+		// dataLock.Unlock()
+		// *reply = "LOCKED"
+
+		// // Handle case where there is a lock assigned to the client requesting again (this handles case )
+		// if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
+		// 	// Serve re-request
+		// 	fmt.Println("Leader serving request from queue")
+		// 	*reply = "OK Rerequest"
+		// } else if data.ClientID != 0 {
+		// 	// Add client to queue
+		// 	dataLock.Lock()
+		// 	data.Queue = append(data.Queue, Request{arg.ClientID, arg.RequestID})
+		// 	dataLock.Unlock()
+		// 	*reply = "LOCKED"
+		// } else {
+		// 	// New request
+		// 	fmt.Println("leader Received request")
+		// 	dataLock.Lock()
+		// 	data.ClientID = arg.ClientID
+		// 	data.RequestID = arg.RequestID
+		// 	dataLock.Unlock()
+		// 	*reply = "OK New request"
+		// }
 	case RELEASE:
 		// Handle case of RELEASE of lock for appropriate callers
 		if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
@@ -133,43 +175,43 @@ func (n *Node) HandleClientMessage(arg *ClientMessage, reply *ClientMessage) err
 			// Get next client in queue
 			if len(data.Queue) > 0 {
 				data.ActiveClient = data.Queue[0]
-				// TODO: JON: Send OK_ENTER to the next active client (use SendClientMessage function)
-
+				// Send OK_ENTER to the next active client (use SendClientMessage function)
+				n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.Queue[0]})
 				data.Queue = data.Queue[1:]
+				// leader replicates data to slave
+				n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
 			} else {
 				data.ActiveClient = Request{0, 0}
 			}
 			dataLock.Unlock()
-			*reply = ClientMessage{OK_RELEASE, LeaderID, Request{0, 0}} // request here is redundant treat as a nil request
+			*reply = OK_RELEASE
 		}
 	}
 	// fmt.Printf("Leader Data: %+v\n", data)
 	return nil
 }
 
-// TODO: create a way to send clients a message through serialising the JSON ClientMessage into bytes to be send
+// send clients a message through writing string to connection. main purpose is to send OK_ENTER to client
 func (n *Node) SendClientMessage(message *ClientMessage) error {
 	clientAddress := "client" + strconv.Itoa(message.Request.ClientID) + ":8080"
+	log.Printf("Connecting to ---  %v", clientAddress)
 
-	conn, err := net.Dial("tcp", clientAddress)
-	if err != nil {
-		return err
+	for {
+		conn, err := net.Dial("tcp", clientAddress)
+		if err != nil {
+			log.Println(err)
+			// return err
+		}
+		if err == nil {
+			defer conn.Close()
+			_, err = conn.Write([]byte(message.ClientMessageType.String()))
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+		time.Sleep(1 * time.Second)
 	}
-	defer conn.Close()
-
-	// Serialize the message using JSON
-	messageBytes, err := json.Marshal(message)
-	if err != nil {
-		return err
-	}
-
-	// Send the serialized message
-	_, err = conn.Write(messageBytes)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // Set up Leader RPC gateway for communication, opening up message channel
@@ -193,17 +235,70 @@ func ServerListener() {
 	}
 }
 
+// util function for leader to call to replicate data to slave
+// if the replication fails, we assume that the slave went down and we have no choice but to reply back to the client even after failed strong consistency replication
+func (n *Node) LeaderReplicateDataToSlave() bool {
+	// dial slave
+	slave, err := rpc.Dial("tcp", "node"+strconv.Itoa(1)+":8080") // this function only works for original node2 leader replicating to node1 slave
+	if err != nil {
+		log.Println("Failed to connect to slave:", err)
+		return false
+	}
+	defer slave.Close()
+
+	// replicate data to slave
+	dataLock.Lock()
+	var reply Data
+	err = slave.Call("Node.ReplicateData", &data, &reply) // leader passes in his own data, and ensures slave replies with the same data, this signals to leader the data is indeed replicated
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+
+	// check slaves reply Data to be identical to my leader Data
+	if reply.ActiveClient != data.ActiveClient {
+		log.Println("Slave data not replicated correctly")
+		return false
+	}
+	if len(reply.Queue) != len(data.Queue) {
+    log.Println("Slave data not replicated correctly")
+		return false
+	} else {
+			for i, v := range data.Queue {
+					if v != reply.Queue[i] {
+							log.Println("Slave data not replicated correctly")
+							return false
+					}
+			}
+	}
+	dataLock.Unlock()
+	return true
+}
+
 // For Leader to send back data for replication & aliveness
-// TODO: add code to change beaviour of function based on idenity (slave / leader)
+// added code to change beaviour of function based on idenity (slave / leader)
 // if node is slave, the slave should take in the data from the args
 // if node is leader the leader should take arg as nil, and reply with its own leader Data
 func (n *Node) ReplicateData(arg *Data, reply *Data) error {
 	dataLock.Lock()
 	defer dataLock.Unlock()
 
-	*reply = data
+	if isLeader {
+		// ignore the input nil Data of external function call by slave
+		// reply the slave of my own leader data
+		*reply = data
+		// fmt.Printf("Leader Data: %+v\n", data)
+	}
 
-	fmt.Printf("Leader Data: %+v\n", data)
+	if !isLeader {
+		// take in the input Data of external function call by leader
+		// reply the leader of my updated slave data
+		data = *arg
+		*reply = data
+		fmt.Printf("Replica Data: %+v\n", data)
+		fmt.Printf("Master Data: %+v\n", *arg)
+	}
+
 	return nil
 }
 
@@ -223,7 +318,7 @@ func SlavePoller() {
 
 			dataLock.Lock()
 			var replicatedData Data
-			err = leader.Call("Node.ReplicateData", nil, &replicatedData)
+			err = leader.Call("Node.ReplicateData", &data, &replicatedData)
 
 			if err != nil {
 				log.Println(err)
@@ -233,16 +328,18 @@ func SlavePoller() {
 
 			dataLock.Unlock()
 
-			fmt.Printf("Slave Data: %+v\n", data)
+			// fmt.Printf("Slave Data: %+v\n", data)
 		}
 	}
 }
 
 func main() {
 	nodeID := os.Getenv("NODE_ID")
+	fmt.Printf("Node ID: %v, initialised\n", nodeID)
 
 	// Set node to isLeader if nodeID is 2
 	isLeader := nodeID == "2"
+	LeaderID = 2
 	data.ActiveClient = Request{0, 0}
 
 	go ServerListener()
