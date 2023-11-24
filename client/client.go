@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+
+	// "math/rand"
 	"net"
 	"net/rpc"
 	"os"
@@ -45,16 +45,6 @@ var (
 )
 
 func SendRequest(requestCount int, requestType ClientMessageType, requestID int) {
-	// var err error
-
-	// err = client.Call("Node.HandleRequest", &message, &reply)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// 	log.Println("Error connecting to Server. Trying to connect to Backup Server")
-	// 	go contactBackup()
-	// }
-	// fmt.Println("Received:", reply)
-
 	// Create leader based on requestCount
 	// By default it will use the leader request
 	// If it is the second request, it will attempt to send the request again to the leader
@@ -126,7 +116,7 @@ func SendRequest(requestCount int, requestType ClientMessageType, requestID int)
 				receivedEnter := false
 				// Start go function with timeout to wait for OK_ENTER from server
 				// If no reply received within 5 seconds, request timeouts and proceeds to retry request
-				ctx2 := sendMessageWithTimeout(client, &receivedEnter)
+				ctx2 := listenWithTimeout(client, &receivedEnter)
 				select {
 				case <-ctx2.Done():
 					if !receivedEnter {
@@ -144,19 +134,9 @@ func SendRequest(requestCount int, requestType ClientMessageType, requestID int)
 			}
 		}
 	}
-	// select {
-	// case reply := <-c:
-	// 	if reply == WAIT {
-	// 		fmt.Println("Waiting")
-	// 	} else if reply == OK_ENTER {
-	// 		fmt.Println("Holding lock")
-	// 	}
-	// case <- time.After(500 * time.Nanosecond):
-	// 	RetryRequest(client)
-	// }
 }
 
-func sendMessageWithTimeout(client *rpc.Client, receivedEnter *bool) context.Context {
+func listenWithTimeout(client *rpc.Client, receivedEnter *bool) context.Context {
 	// Declare a timeout for the request
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -170,112 +150,33 @@ func listenForServerMessages(receivedEnter *bool) {
 		log.Fatal("Server message failed", err)
 	}
 	defer ln.Close()
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Println(err)
-			continue
-		}
-		go handleServerMessage(conn, receivedEnter)
+
+	conn, err := ln.Accept()
+	if err != nil {
+		log.Println(err)
 	}
+	handleServerMessage(conn, receivedEnter)
 }
 
 func handleServerMessage(conn net.Conn, receivedEnter *bool) {
 	defer conn.Close()
-
-	// Use bufio.NewReader to read from the connection
-	reader := bufio.NewReader(conn)
-
+	tmp := make([]byte, 256) // using small tmo buffer for demonstrating
 	for {
-		// ReadString reads until the first occurrence of the delimiter in the input
-		message, err := reader.ReadString('\n') // '\n' is the line delimiter
+		_, err := conn.Read(tmp)
 		if err != nil {
 			if err != io.EOF {
-				fmt.Println("Error reading:", err)
+				fmt.Println("read error:", err)
 			}
 			break
 		}
-
-		// Process the received string message
-		fmt.Printf("Received message: %s", message)
-		if message == "OK_ENTER" {
-			fmt.Println("Client", nodeID, "received OK_ENTER from Leader")
-			// Some critical section function
-			time.Sleep(2 * time.Second)
-			*receivedEnter = true
-			SendRequest(1, RELEASE, requestID)
-		}
+		fmt.Println("Client", nodeID, "received OK_ENTER from Leader")
+		// Some critical section function
+		time.Sleep(2 * time.Second)
+		*receivedEnter = true
+		SendRequest(1, RELEASE, requestID)
+		break
 	}
 }
-
-// func SendRelease(client *rpc.Client) {
-// 	var err error
-// 	var reply MessageType
-// }
-
-// func RequestLock() {
-// 	requestCount = 1
-// 	requestID = 1
-// 	SendRequest(requestCount, REQUEST, requestID)
-
-// message.MessageType = RELEASE
-// fmt.Println("Client", nodeID, "sent Release lock")
-// SendRequest(client)
-
-// // Queued requests
-// time.Sleep(time.Second)
-
-// message.Body = "REQUEST"
-// message.RequestID += 1
-// fmt.Println("Client", nodeID, "sent Request", message.RequestID, "for lock")
-// SendRequest(client)
-
-// time.Sleep(time.Second)
-
-// message.Body = "RELEASE"
-// fmt.Println("Client", nodeID, "sent Release lock")
-// SendRequest(client)
-
-// // New requests
-// time.Sleep(4 * time.Second)
-
-// message.Body = "REQUEST"
-// message.RequestID += 1
-// fmt.Println("Client", nodeID, "sent Request", message.RequestID, "for lock")
-// SendRequest(client)
-
-// time.Sleep(time.Second)
-
-// message.Body = "RELEASE"
-// fmt.Println("Client", nodeID, "sent Release lock")
-// SendRequest(client)
-// }
-
-// func contactServer() {
-// 	nodeID, _ := strconv.Atoi(os.Getenv("NODE_ID"))
-// 	leaderAddress := os.Getenv("LEADER_ADDRESS") // Assume the format is "node2:8080"
-// 	client, err := rpc.Dial("tcp", leaderAddress)
-// 	if err != nil {
-// 		log.Fatal("Failed to connect to leader:", err)
-// 	}
-// 	defer client.Close()
-// 	fmt.Println("Client", nodeID, "connected to server")
-// 	go RequestLock(client, nodeID)
-// 	time.Sleep(30 * time.Second)
-// }
-
-// func contactBackup() {
-// 	nodeID, _ := strconv.Atoi(os.Getenv("NODE_ID"))
-// 	backupAddress := os.Getenv("BACKUP_ADDRESS") // Assume the format is "node2:8080"
-// 	client, err := rpc.Dial("tcp", backupAddress)
-// 	if err != nil {
-// 		log.Fatal("Failed to connect to backup  server:", err)
-// 	}
-// 	defer client.Close()
-// 	fmt.Println("Client", nodeID, "connected to backup server")
-// 	go RequestLock(client, nodeID)
-// 	time.Sleep(30 * time.Second)
-// }
 
 func main() {
 	nodeID, _ = strconv.Atoi(os.Getenv("NODE_ID"))
@@ -295,11 +196,11 @@ func main() {
 		}
 		requestID++
 		// Define the range for the timeout (e.g., between 1 and 5 seconds)
-		minTimeout := 1
-		maxTimeout := 5
+		// minTimeout := 1
+		// maxTimeout := 5
 
 		// Generate a random duration within the range
-		randomDuration := time.Duration(rand.Intn(maxTimeout-minTimeout+1)+minTimeout) * time.Second
-		time.Sleep(randomDuration)
+		// randomDuration := time.Duration(rand.Intn(maxTimeout-minTimeout+1)+minTimeout) * time.Second
+		time.Sleep(10 * time.Second)
 	}
 }

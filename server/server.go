@@ -170,22 +170,21 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 		// }
 	case RELEASE:
 		// Handle case of RELEASE of lock for appropriate callers
-		fmt.Println(data.ActiveClient, arg.Request)
+		// fmt.Println(data.ActiveClient, arg.Request)
 		// dataLock.Lock()
 		if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
-			log.Printf("what the fuck macbook sucks")
 			// Get next client in queue
 			if len(data.Queue) > 0 {
 				data.ActiveClient = data.Queue[0]
 				data.Queue = data.Queue[1:]
-				// leader replicates data to slave
-				n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
-				log.Printf("Replicated data to slave")
 				// Send OK_ENTER to the next active client (use SendClientMessage function)
 				defer n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
 			} else {
 				data.ActiveClient = Request{0, 0}
 			}
+			// leader replicates data to slave
+			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+			log.Printf("Replicated data to slave")
 			// dataLock.Unlock()
 			*reply = OK_RELEASE
 			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
