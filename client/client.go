@@ -14,14 +14,14 @@ import (
 	"time"
 )
 
-type MessageType int
+type ClientMessageType int
 
 const (
-	REQUEST    MessageType = iota // for client to make a request to server
-	RELEASE                       // for client to tell server that client is done with cs
-	OK_RELEASE                    // for server to tell client that release is successful
-	WAIT                          // for server to tell client to wait
-	OK_ENTER                      // for server to signal to client to enter cs
+	REQUEST    ClientMessageType = iota // for client to make a request to server
+	RELEASE                             // for client to tell server that client is done with cs
+	OK_RELEASE                          // for server to tell client that release is successful
+	WAIT                                // for server to tell client to wait
+	OK_ENTER                            // for server to signal to client to enter cs
 )
 
 // Request information for server-client communications
@@ -31,9 +31,9 @@ type Request struct {
 }
 
 type Message struct {
-	MessageType MessageType
-	LeaderID    int
-	Request     Request
+	ClientMessageType ClientMessageType
+	LeaderID          int
+	Request           Request
 }
 
 var (
@@ -44,7 +44,7 @@ var (
 	requestCompleted int
 )
 
-func SendRequest(requestCount int, requestType MessageType, requestID int) {
+func SendRequest(requestCount int, requestType ClientMessageType, requestID int) {
 	// var err error
 
 	// err = client.Call("Node.HandleRequest", &message, &reply)
@@ -74,7 +74,7 @@ func SendRequest(requestCount int, requestType MessageType, requestID int) {
 	// Set message fields
 	message.Request.RequestID = requestID
 	message.Request.ClientID = nodeID
-	message.MessageType = requestType
+	message.ClientMessageType = requestType
 
 	// Dial server
 	leaderAddress := os.Getenv(leader) // Assume the format is "node2:8080"
@@ -86,12 +86,12 @@ func SendRequest(requestCount int, requestType MessageType, requestID int) {
 	fmt.Println("Client", nodeID, "connected to server")
 
 	// Declare a timeout for the request
-	var reply MessageType
+	var reply ClientMessageType
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		fmt.Printf("Sending: %+v\n", message.MessageType)
+		fmt.Printf("Sending: %+v\n", message.ClientMessageType)
 		err := client.Call("Node.HandleRequest", &message, &reply)
 		done <- err
 	}()
