@@ -91,6 +91,7 @@ func SendRequest(requestCount int, requestType MessageType, requestID int) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
+		fmt.Printf("Sending: %+v\n", message.MessageType)
 		err := client.Call("Node.HandleRequest", &message, &reply)
 		done <- err
 	}()
@@ -133,6 +134,10 @@ func SendRequest(requestCount int, requestType MessageType, requestID int) {
 						SendRequest(requestCount, requestType, requestID)
 					}
 				}
+			} else if reply == OK_ENTER {
+				fmt.Println("Entering Critical section")
+				time.Sleep(2 * time.Second)
+				SendRequest(1, RELEASE, requestID)
 			} else if reply == OK_RELEASE {
 				fmt.Println("Client", nodeID, "received OK_RELEASE from Leader ", message.LeaderID)
 				requestCompleted = requestID
@@ -275,7 +280,7 @@ func handleServerMessage(conn net.Conn, receivedEnter *bool) {
 func main() {
 	nodeID, _ = strconv.Atoi(os.Getenv("NODE_ID"))
 	// Wait for server goroutines to initialise
-	time.Sleep(7 * time.Second)
+	// time.Sleep(7 * time.Second)
 
 	// Start request for lock
 	requestCount = 1
