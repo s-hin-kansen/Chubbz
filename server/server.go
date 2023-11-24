@@ -38,17 +38,17 @@ const (
 func (cmt ClientMessageType) String() string {
 	switch cmt {
 	case REQUEST:
-			return "REQUEST"
+		return "REQUEST"
 	case RELEASE:
-			return "RELEASE"
+		return "RELEASE"
 	case OK_RELEASE:
-			return "OK_RELEASE"
+		return "OK_RELEASE"
 	case WAIT:
-			return "WAIT"
+		return "WAIT"
 	case OK_ENTER:
 		return "OK_ENTER"
 	default:
-			return "Unknown"
+		return "Unknown"
 	}
 }
 
@@ -105,16 +105,16 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 	case REQUEST:
 
 		/*
-			1. Get the request
-			2. Check if someone else is an data.ActiveClient
-				2.1. If not,change data.ActiveClient to client
-				2.2.Add to queue
-			3.Make a function call to the slave server to replicate data
-				3.1.Wait for the slave server to reply OK
-3.2. Slave server does not reply ok, might be down, don't think of it for now
-			4. Reply to the client either
-				4.1. OK_ENTER
-				4.2. WAIT
+						1. Get the request
+						2. Check if someone else is an data.ActiveClient
+							2.1. If not,change data.ActiveClient to client
+							2.2.Add to queue
+						3.Make a function call to the slave server to replicate data
+							3.1.Wait for the slave server to reply OK
+			3.2. Slave server does not reply ok, might be down, don't think of it for now
+						4. Reply to the client either
+							4.1. OK_ENTER
+							4.2. WAIT
 		*/
 
 		req := arg.Request // get the client request
@@ -170,21 +170,26 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 		// }
 	case RELEASE:
 		// Handle case of RELEASE of lock for appropriate callers
+		fmt.Println(data.ActiveClient, arg.Request)
+		// dataLock.Lock()
 		if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
-			dataLock.Lock()
+			log.Printf("what the fuck macbook sucks")
 			// Get next client in queue
 			if len(data.Queue) > 0 {
 				data.ActiveClient = data.Queue[0]
-				// Send OK_ENTER to the next active client (use SendClientMessage function)
-				n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.Queue[0]})
 				data.Queue = data.Queue[1:]
 				// leader replicates data to slave
 				n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+				log.Printf("Replicated data to slave")
+				// Send OK_ENTER to the next active client (use SendClientMessage function)
+				defer n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
 			} else {
 				data.ActiveClient = Request{0, 0}
 			}
-			dataLock.Unlock()
+			// dataLock.Unlock()
 			*reply = OK_RELEASE
+			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
+			// dataLock.Unlock()
 		}
 	}
 	// fmt.Printf("Leader Data: %+v\n", data)
@@ -208,6 +213,7 @@ func (n *Node) SendClientMessage(message *ClientMessage) error {
 			if err != nil {
 				return err
 			}
+			log.Printf("Sent OK_ENTER to Client %d", data.ActiveClient.ClientID)
 			return nil
 		}
 		time.Sleep(1 * time.Second)
@@ -261,17 +267,18 @@ func (n *Node) LeaderReplicateDataToSlave() bool {
 		return false
 	}
 	if len(reply.Queue) != len(data.Queue) {
-    log.Println("Slave data not replicated correctly")
+		log.Println("Slave data not replicated correctly")
 		return false
 	} else {
-			for i, v := range data.Queue {
-					if v != reply.Queue[i] {
-							log.Println("Slave data not replicated correctly")
-							return false
-					}
+		for i, v := range data.Queue {
+			if v != reply.Queue[i] {
+				log.Println("Slave data not replicated correctly")
+				return false
 			}
+		}
 	}
 	dataLock.Unlock()
+	log.Printf("Slave data replicated correctly in LeaderReplicateToSalve func")
 	return true
 }
 
