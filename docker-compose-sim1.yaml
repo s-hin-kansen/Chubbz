@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile.server
     environment:
       - NODE_ID=2
-      - SIM_NO=4
+      - SIM_NO=1
     ports:
       - "8080:8080"
 
@@ -16,7 +16,7 @@ services:
       dockerfile: Dockerfile.server
     environment:
       - NODE_ID=1
-      - SIM_NO=4
+      - SIM_NO=1
     depends_on:
       - node2
 

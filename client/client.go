@@ -108,7 +108,7 @@ func SendRequest(
 	select {
 	case <-ctx.Done():
 		fmt.Println("Request timed out")
-		SendRequest(requestCount, requestType, requestID)
+		go SendRequest(requestCount, requestType, requestID)
 	case err := <-done:
 		if err != nil {
 			fmt.Printf("RPC call failed: %v\n", err)
@@ -202,18 +202,25 @@ func main() {
 	// Configuration passed from dockerfile
 
 	// Request for lock after
-	for {
-		go SendRequest(requestCount, REQUEST, requestID)
-		for requestCompleted != requestID {
-			time.Sleep(time.Second)
-		}
-		requestID++
-		// Define the range for the timeout (e.g., between 1 and 5 seconds)
-		// minTimeout := 1
-		// maxTimeout := 5
 
-		// Generate a random duration within the range
-		// randomDuration := time.Duration(rand.Intn(maxTimeout-minTimeout+1)+minTimeout) * time.Second
-		time.Sleep(10 * time.Second)
-	}
+	time.Sleep(5 * time.Second)
+	go SendRequest(requestCount, REQUEST, requestID)
+	time.Sleep(1000 * time.Second)
+
+	// for {
+	// 	go SendRequest(requestCount, REQUEST, requestID)
+	// 	for requestCompleted != requestID {
+	// 		time.Sleep(time.Second)
+	// 	}
+	// 	requestID++
+
+	// 	// Define the range for the timeout (e.g., between 1 and 5 seconds)
+	// 	// minTimeout := 1
+	// 	// maxTimeout := 5
+
+	// 	// Generate a random duration within the range
+	// 	// randomDuration := time.Duration(rand.Intn(maxTimeout-minTimeout+1)+minTimeout) * time.Second
+
+	// 	time.Sleep(10 * time.Second)
+	// }
 }

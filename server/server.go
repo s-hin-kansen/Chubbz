@@ -94,6 +94,7 @@ var (
 	dataLock sync.Mutex
 	dead     bool
 	nodeID   string
+	sim      string
 )
 
 type Node int
@@ -136,6 +137,10 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			*reply = OK_ENTER
 			// PATCH we hope to rmv this send OK_ENTER by the send one way msg way. but note still need to use the one way msg function upon dequeuing active client and telling next client in queue to OK_ENTER
 			//n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
+			if sim == "3" {
+				dead = true
+				log.Printf("Node %s is now dead", nodeID)
+			}
 		} else {
 			// add to queue
 			dataLock.Lock()
@@ -164,6 +169,11 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
 			log.Printf("Replicated data to slave")
 			// dataLock.Unlock()
+			if sim == "4" {
+				dead = true
+				log.Printf("Node %s is now dead", nodeID)
+				return nil
+			}
 			*reply = OK_RELEASE
 			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
 			// dataLock.Unlock()
@@ -269,6 +279,10 @@ func (n *Node) LeaderReplicateDataToSlave() bool {
 // if node is slave, the slave should take in the data from the args
 // if node is leader the leader should take arg as nil, and reply with its own leader Data
 func (n *Node) ReplicateData(arg *Data, reply *Data) error {
+	if dead {
+		return nil
+	}
+
 	dataLock.Lock()
 	defer dataLock.Unlock()
 
@@ -297,7 +311,7 @@ func (n *Node) SetDead(arg *bool, reply *bool) error {
 	dataLock.Lock()
 	defer dataLock.Unlock()
 	dead = *arg
-	log.Println("Node %d is now dead", nodeID)
+	log.Printf("Node %d is now dead", nodeID)
 	return nil
 }
 
@@ -345,28 +359,33 @@ func main() {
 	LeaderID = 2
 	data.ActiveClient = Request{0, 0}
 
-	// Get simulation variable
-	simStr := os.Getenv("SIM_NO")
-	sim, err := strconv.Atoi(simStr)
-	if err != nil {
-		log.Fatalf("Failed to convert SIM_NO to integer: %v", err)
+	go ServerListener()
+
+	if !isLeader {
+		go SlavePoller()
 	}
+
+	// Get simulation variable
+	sim = os.Getenv("SIM_NO")
 	switch sim {
-	case 1:
+	case "1":
 		// Handle case when sim is 1: normal operations no changes
 		dead = false
 
-		go ServerListener()
-
-		if !isLeader {
-			go SlavePoller()
+	case "2":
+		// Handle case when sim is 2: intermittent down after granting lock, come back up after slave releases loc
+		if isLeader {
+			dead = true
+			time.Sleep(5 * time.Second)
+			log.Printf("Node %d is now dead", nodeID)
+			time.Sleep(2 * time.Second)
+			dead = false
+			log.Printf("Node %d is now back alive", nodeID)
 		}
-	case 2:
-		// Handle case when sim is 2: intermittent down after granting lock, come back up after slave releases lock
 
-	case 3:
+	case "3":
 		// Handle case when sim is 3: permanent down before granting lock
-	case 4:
+	case "4":
 		// Handle case when sim is 4: permanent down whiteboard example
 	default:
 		log.Fatalf("Invalid SIM_NO: %v", sim)
