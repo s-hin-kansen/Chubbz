@@ -92,29 +92,34 @@ var (
 	isLeader bool
 	data     Data
 	dataLock sync.Mutex
+	dead     bool
+	nodeID   string
 )
 
 type Node int
 
 // For Leader to handle requests from clients
 func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error {
+	if dead {
+		return nil
+	}
+
 	fmt.Printf("Leader received %+v: from Client %d\n", arg.ClientMessageType.String(), arg.Request.ClientID)
 	switch arg.ClientMessageType {
 	// This request should take in types of REQUEST and RELEASE
 	// In doing so, it should also reply to the client either OK_RELEASE, WAIT, OK_ENTER
 	case REQUEST:
-
 		/*
-						1. Get the request
-						2. Check if someone else is an data.ActiveClient
-							2.1. If not,change data.ActiveClient to client
-							2.2.Add to queue
-						3.Make a function call to the slave server to replicate data
-							3.1.Wait for the slave server to reply OK
-			3.2. Slave server does not reply ok, might be down, don't think of it for now
-						4. Reply to the client either
-							4.1. OK_ENTER
-							4.2. WAIT
+			1. Get the request
+			2. Check if someone else is an data.ActiveClient
+				2.1. If not,change data.ActiveClient to client
+				2.2.Add to queue
+			3.Make a function call to the slave server to replicate data
+				3.1.Wait for the slave server to reply OK
+				3.2. Slave server does not reply ok, might be down, don't think of it for now
+			4. Reply to the client either
+				4.1. OK_ENTER
+				4.2. WAIT
 		*/
 
 		req := arg.Request // get the client request
@@ -141,33 +146,6 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			// reply to client WAIT
 			*reply = WAIT
 		}
-
-		// // Add client to queue
-		// dataLock.Lock()
-		// data.Queue = append(data.Queue, Request{arg.Request.ClientID, arg.Request.RequestID})
-		// dataLock.Unlock()
-		// *reply = "LOCKED"
-
-		// // Handle case where there is a lock assigned to the client requesting again (this handles case )
-		// if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
-		// 	// Serve re-request
-		// 	fmt.Println("Leader serving request from queue")
-		// 	*reply = "OK Rerequest"
-		// } else if data.ClientID != 0 {
-		// 	// Add client to queue
-		// 	dataLock.Lock()
-		// 	data.Queue = append(data.Queue, Request{arg.ClientID, arg.RequestID})
-		// 	dataLock.Unlock()
-		// 	*reply = "LOCKED"
-		// } else {
-		// 	// New request
-		// 	fmt.Println("leader Received request")
-		// 	dataLock.Lock()
-		// 	data.ClientID = arg.ClientID
-		// 	data.RequestID = arg.RequestID
-		// 	dataLock.Unlock()
-		// 	*reply = "OK New request"
-		// }
 	case RELEASE:
 		// Handle case of RELEASE of lock for appropriate callers
 		// fmt.Println(data.ActiveClient, arg.Request)
@@ -189,6 +167,11 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			*reply = OK_RELEASE
 			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
 			// dataLock.Unlock()
+		} else { // handle the case when leader goes down before sending OK_RELEASE to client and this new slave becomes leader,
+			// and client sends RELEASE to this new leader, but this new leader does not have the client in its data.ActiveClient
+			// trivially send the OK_RELEASE command to the lingering client
+			*reply = OK_RELEASE
+			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
 		}
 	}
 	// fmt.Printf("Leader Data: %+v\n", data)
@@ -308,10 +291,24 @@ func (n *Node) ReplicateData(arg *Data, reply *Data) error {
 	return nil
 }
 
+// Setter function to set dead or or not dead state of the node
+func (n *Node) SetDead(arg *bool, reply *bool) error {
+	// take in the input from the one who made the funciton call , dont need to reply
+	dataLock.Lock()
+	defer dataLock.Unlock()
+	dead = *arg
+	log.Println("Node %d is now dead", nodeID)
+	return nil
+}
+
 // For Slave to poll for data update & handle simple failover procedure
 func SlavePoller() {
 	for {
 		time.Sleep(5 * time.Second)
+
+		if dead {
+			return
+		}
 
 		if !isLeader {
 			leader, err := rpc.Dial("tcp", "node"+strconv.Itoa(LeaderID)+":8080")
@@ -340,7 +337,7 @@ func SlavePoller() {
 }
 
 func main() {
-	nodeID := os.Getenv("NODE_ID")
+	nodeID = os.Getenv("NODE_ID")
 	fmt.Printf("Node ID: %v, initialised\n", nodeID)
 
 	// Set node to isLeader if nodeID is 2
@@ -348,10 +345,31 @@ func main() {
 	LeaderID = 2
 	data.ActiveClient = Request{0, 0}
 
-	go ServerListener()
+	// Get simulation variable
+	simStr := os.Getenv("SIM_NO")
+	sim, err := strconv.Atoi(simStr)
+	if err != nil {
+		log.Fatalf("Failed to convert SIM_NO to integer: %v", err)
+	}
+	switch sim {
+	case 1:
+		// Handle case when sim is 1: normal operations no changes
+		dead = false
 
-	if !isLeader {
-		go SlavePoller()
+		go ServerListener()
+
+		if !isLeader {
+			go SlavePoller()
+		}
+	case 2:
+		// Handle case when sim is 2: intermittent down after granting lock, come back up after slave releases lock
+
+	case 3:
+		// Handle case when sim is 3: permanent down before granting lock
+	case 4:
+		// Handle case when sim is 4: permanent down whiteboard example
+	default:
+		log.Fatalf("Invalid SIM_NO: %v", sim)
 	}
 
 	// Block main goroutine

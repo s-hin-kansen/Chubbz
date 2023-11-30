@@ -44,7 +44,12 @@ var (
 	requestCompleted int
 )
 
-func SendRequest(requestCount int, requestType ClientMessageType, requestID int) {
+// Split into request for lock & release lock
+func SendRequest(
+	requestCount int,
+	requestType ClientMessageType,
+	requestID int,
+) {
 	// Create leader based on requestCount
 	// By default it will use the leader request
 	// If it is the second request, it will attempt to send the request again to the leader
@@ -114,18 +119,20 @@ func SendRequest(requestCount int, requestType ClientMessageType, requestID int)
 			if reply == WAIT {
 				fmt.Println("Client", nodeID, "received WAIT from Leader ", message.LeaderID)
 				receivedEnter := false
-				// Start go function with timeout to wait for OK_ENTER from server
-				// If no reply received within 5 seconds, request timeouts and proceeds to retry request
-				ctx2 := listenWithTimeout(client, &receivedEnter)
-				select {
-				case <-ctx2.Done():
-					if !receivedEnter {
-						fmt.Println("Request timed out")
-						SendRequest(requestCount, requestType, requestID)
-					}
-				}
+				// // Start go function with timeout to wait for OK_ENTER from server
+				// // If no reply received within 5 seconds, request timeouts and proceeds to retry request
+				// ctx2 := listenWithTimeout(client, &receivedEnter)
+				// select {
+				// case <-ctx2.Done():
+				// 	if !receivedEnter {
+				// 		fmt.Println("Request timed out")
+				// 		SendRequest(requestCount, requestType, requestID)
+				// 	}
+				// }
+				listenForServerMessages(&receivedEnter)
 			} else if reply == OK_ENTER {
 				fmt.Println("Entering Critical section")
+				// TODO: Put as a time waiting for global variable, take context from the dockerfile
 				time.Sleep(2 * time.Second)
 				SendRequest(1, RELEASE, requestID)
 			} else if reply == OK_RELEASE {
@@ -136,14 +143,16 @@ func SendRequest(requestCount int, requestType ClientMessageType, requestID int)
 	}
 }
 
-func listenWithTimeout(client *rpc.Client, receivedEnter *bool) context.Context {
-	// Declare a timeout for the request
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	listenForServerMessages(receivedEnter)
-	return ctx
-}
+// // Request to enter again, health check for the server
+// func listenWithTimeout(client *rpc.Client, receivedEnter *bool) context.Context {
+// 	// Declare a timeout for the request
+// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// 	defer cancel()
+// 	listenForServerMessages(receivedEnter)
+// 	return ctx
+// }
 
+// Open listener for "OK ENTER"
 func listenForServerMessages(receivedEnter *bool) {
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
@@ -158,6 +167,7 @@ func listenForServerMessages(receivedEnter *bool) {
 	handleServerMessage(conn, receivedEnter)
 }
 
+// Handling of "OK ENTER"
 func handleServerMessage(conn net.Conn, receivedEnter *bool) {
 	defer conn.Close()
 	tmp := make([]byte, 256) // using small tmo buffer for demonstrating
@@ -187,6 +197,9 @@ func main() {
 	requestCount = 1
 	requestID = 1
 	requestCompleted = 0
+
+	// Switch case here to request & release locks
+	// Configuration passed from dockerfile
 
 	// Request for lock after
 	for {
