@@ -65,7 +65,8 @@ type Data struct {
 	ActiveClient Request
 	// ClientID  int // represets which client is currently holding the lock
 	// RequestID int
-	Queue []Request
+	Queue          []Request
+	PreviousClient Request
 }
 
 /*
@@ -131,6 +132,7 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			dataLock.Lock()
 			data.ActiveClient = req
 			dataLock.Unlock()
+
 			// replicate leader data to slave
 			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
 			// reply to client OK_ENTER - TODO: NOTE client side currently does not handle this, can possibly ask client side to help upgrade, or else for now we will send 2x OK_ENTER	in 2 diff ways since the client does support the PATCH below
@@ -148,6 +150,7 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			dataLock.Unlock()
 			// replicate leader data to slave
 			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+
 			// reply to client WAIT
 			*reply = WAIT
 		}
@@ -155,21 +158,26 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 		// Handle case of RELEASE of lock for appropriate callers
 		// fmt.Println(data.ActiveClient, arg.Request)
 		// dataLock.Lock()
+		// log.Println(data, arg.Request)
+		// log.Println("check: ", data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID)
 		if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
 			// Get next client in queue
 			if len(data.Queue) > 0 {
+				data.PreviousClient = data.ActiveClient // Save Previous request
 				data.ActiveClient = data.Queue[0]
 				data.Queue = data.Queue[1:]
 				// Send OK_ENTER to the next active client (use SendClientMessage function)
-				defer n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
+				if sim != "4" || nodeID == "1" {
+					defer n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
+				}
 			} else {
 				data.ActiveClient = Request{0, 0}
 			}
 			// leader replicates data to slave
 			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
-			log.Printf("Replicated data to slave")
+
 			// dataLock.Unlock()
-			if sim == "4" {
+			if sim == "4" && nodeID == "2" {
 				dead = true
 				log.Printf("Node %s is now dead", nodeID)
 				return nil
@@ -180,8 +188,17 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 		} else { // handle the case when leader goes down before sending OK_RELEASE to client and this new slave becomes leader,
 			// and client sends RELEASE to this new leader, but this new leader does not have the client in its data.ActiveClient
 			// trivially send the OK_RELEASE command to the lingering client
+
 			*reply = OK_RELEASE
 			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
+
+			// Fault tolerance for failing in between replications
+			// log.Printf("Checking if previous client is waiting for OK_ENTER")
+			// log.Println(data.PreviousClient.ClientID == arg.Request.ClientID && data.PreviousClient.RequestID == arg.Request.RequestID)
+			// log.Println(data.PreviousClient, arg.Request)
+			if data.PreviousClient.ClientID == arg.Request.ClientID && data.PreviousClient.RequestID == arg.Request.RequestID {
+				n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
+			}
 		}
 	}
 	// fmt.Printf("Leader Data: %+v\n", data)
@@ -236,6 +253,10 @@ func ServerListener() {
 // util function for leader to call to replicate data to slave
 // if the replication fails, we assume that the slave went down and we have no choice but to reply back to the client even after failed strong consistency replication
 func (n *Node) LeaderReplicateDataToSlave() bool {
+	if nodeID == "1" {
+		return true
+	}
+
 	// dial slave
 	slave, err := rpc.Dial("tcp", "node"+strconv.Itoa(1)+":8080") // this function only works for original node2 leader replicating to node1 slave
 	if err != nil {
@@ -269,6 +290,11 @@ func (n *Node) LeaderReplicateDataToSlave() bool {
 			}
 		}
 	}
+	if reply.PreviousClient != data.PreviousClient {
+		log.Println("Slave data not replicated correctly")
+		return false
+	}
+
 	dataLock.Unlock()
 	log.Printf("Slave data replicated correctly in LeaderReplicateToSalve func")
 	return true
@@ -315,7 +341,12 @@ func (n *Node) SetDead(arg *bool, reply *bool) error {
 	return nil
 }
 
-// For Slave to poll for data update & handle simple failover procedure
+func (n *Node) AreYouDead(arg *string, reply *bool) error {
+	*reply = dead
+	return nil
+}
+
+// Slave: Poll for data update & handle simple failover procedure
 func SlavePoller() {
 	for {
 		time.Sleep(5 * time.Second)
@@ -324,14 +355,40 @@ func SlavePoller() {
 			return
 		}
 
+		log.Println("ISLEADER", isLeader)
 		if !isLeader {
 			leader, err := rpc.Dial("tcp", "node"+strconv.Itoa(LeaderID)+":8080")
+			defer leader.Close()
+
+			// If unable to connect
 			if err != nil {
-				log.Println("Failed to connect to leader, becoming leader:", err)
+				log.Println("Failed to connect to leader", err)
+			}
+
+			// Check if leader is dead through a specific call
+			var leaderDead bool
+			err = leader.Call("Node.AreYouDead", "", &leaderDead)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			if leaderDead {
 				isLeader = true
+
+				// Announcing to all clients that it won the election
+				for i := 1; i <= 10; i++ {
+					client, err := net.Dial("tcp", "client"+strconv.Itoa(i)+":8081")
+					_, err = client.Write([]byte(nodeID))
+					if err != nil {
+						log.Println("Failed to connect to client:", err)
+						continue
+					}
+					defer client.Close()
+					log.Printf("Announced to Client %d that I am the new leader", i)
+				}
 				break
 			}
-			defer leader.Close()
 
 			dataLock.Lock()
 			var replicatedData Data
@@ -341,6 +398,7 @@ func SlavePoller() {
 				log.Println(err)
 				continue
 			}
+			log.Println(nodeID, replicatedData, data)
 			data = replicatedData
 
 			dataLock.Unlock()

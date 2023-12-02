@@ -42,6 +42,7 @@ var (
 	requestCount     int
 	requestID        int
 	requestCompleted int
+	leader           string
 )
 
 // Split into request for lock & release lock
@@ -54,18 +55,17 @@ func SendRequest(
 	// By default it will use the leader request
 	// If it is the second request, it will attempt to send the request again to the leader
 	// If it is the third request, it will contact the backup
-	var leader string
-	if requestCount < 3 {
-		leader = "LEADER_ADDRESS"
-		message.LeaderID = 2
-	} else if requestCount == 3 {
-		leader = "BACKUP_ADDRESS"
-		message.LeaderID = 1
-	} else {
-		fmt.Println("Not handled")
-		return
+	if leader == "LEADER_ADDRESS" {
+		if requestCount < 3 {
+			message.LeaderID = 2
+		} else if requestCount == 3 {
+			leader = "BACKUP_ADDRESS"
+			message.LeaderID = 1
+		} else {
+			fmt.Println("Not handled")
+			return
+		}
 	}
-
 	// Set message fields
 	message.Request.RequestID = requestID
 	message.Request.ClientID = nodeID
@@ -86,7 +86,7 @@ func SendRequest(
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		fmt.Printf("Sending: %+v\n", message.ClientMessageType)
+		// fmt.Printf("Sending: %+v\n", message.ClientMessageType)
 		err := client.Call("Node.HandleRequest", &message, &reply)
 		done <- err
 	}()
@@ -138,6 +138,9 @@ func SendRequest(
 			} else if reply == OK_RELEASE {
 				fmt.Println("Client", nodeID, "received OK_RELEASE from Leader ", message.LeaderID)
 				requestCompleted = requestID
+			} else if reply == 0 {
+				fmt.Println("Error connecting to Server. Trying again")
+				SendRequest(requestCount, requestType, requestID)
 			}
 		}
 	}
@@ -154,6 +157,7 @@ func SendRequest(
 
 // Open listener for "OK ENTER"
 func listenForServerMessages(receivedEnter *bool) {
+	log.Println("Listening on 8080")
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Fatal("Server message failed", err)
@@ -188,18 +192,46 @@ func handleServerMessage(conn net.Conn, receivedEnter *bool) {
 	}
 }
 
+func listenForLeaderElection() {
+	ln, err := net.Listen("tcp", ":8081")
+	if err != nil {
+		log.Fatal("Server message failed", err)
+	}
+	defer ln.Close()
+
+	conn, err := ln.Accept()
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer conn.Close()
+	tmp := make([]byte, 256) // using small tmo buffer for demonstrating
+	for {
+		output, err := conn.Read(tmp)
+		if err != nil {
+			if err != io.EOF {
+				fmt.Println("read error:", err)
+			}
+			break
+		}
+		fmt.Println("New leader elected: ", output)
+		leader = "BACKUP_ADDRESS"
+		break
+	}
+}
+
 func main() {
 	nodeID, _ = strconv.Atoi(os.Getenv("NODE_ID"))
 	// Wait for server goroutines to initialise
 	// time.Sleep(7 * time.Second)
 
+	leader = "LEADER_ADDRESS"
 	// Start request for lock
 	requestCount = 1
 	requestID = 1
 	requestCompleted = 0
 
-	// Switch case here to request & release locks
-	// Configuration passed from dockerfile
+	go listenForLeaderElection()
 
 	// Request for lock after
 
