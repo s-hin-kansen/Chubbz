@@ -11,3 +11,6 @@ Permanent down after granting FIRST lock
 
 Simulation 4:
 Permanent down AFTER receiving release & data replication but before replying RELEASE OK
+
+Simulation 5:
+"Permanent" down, comes back alive after Backup takes control

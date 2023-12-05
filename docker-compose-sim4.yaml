@@ -1,4 +1,4 @@
-version: '3'
+version: '4'
 services:
   node2:
     build:
@@ -7,6 +7,8 @@ services:
     environment:
       - NODE_ID=2
       - SIM_NO=4
+      - CLIENT_NUM=10
+
     ports:
       - "8080:8080"
 
@@ -17,6 +19,8 @@ services:
     environment:
       - NODE_ID=1
       - SIM_NO=4
+      - CLIENT_NUM=10
+
     depends_on:
       - node2
 

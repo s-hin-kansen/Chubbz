@@ -89,13 +89,14 @@ type ServerMessage struct {
 These are the properties the server has
 */
 var (
-	LeaderID int
-	isLeader bool
-	data     Data
-	dataLock sync.Mutex
-	dead     bool
-	nodeID   string
-	sim      string
+	LeaderID  int
+	isLeader  bool
+	data      Data
+	dataLock  sync.Mutex
+	dead      bool
+	nodeID    string
+	sim       string
+	clientNum int
 )
 
 type Node int
@@ -107,7 +108,7 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 		return nil
 	}
 
-	fmt.Printf("Leader received %+v: from Client %d\n", arg.ClientMessageType.String(), arg.Request.ClientID)
+	log.Printf("Leader received %+v: from Client %d\n", arg.ClientMessageType.String(), arg.Request.ClientID)
 	switch arg.ClientMessageType {
 	// This request should take in types of REQUEST and RELEASE
 	// In doing so, it should also reply to the client either OK_RELEASE, WAIT, OK_ENTER
@@ -125,46 +126,44 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 				4.2. WAIT
 		*/
 
-		req := arg.Request // get the client request
-
+		req := arg.Request         // get the client request
 		nonActive := Request{0, 0} // handle the trivial case when theres no active client at all
 		if data.ActiveClient == nonActive {
 			// set ActiveClient to the request
-			dataLock.Lock()
 			data.ActiveClient = req
-			dataLock.Unlock()
 
 			// replicate leader data to slave
 			n.LeaderReplicateDataToSlave()
 
-			// reply to client OK_ENTER - TODO: NOTE client side currently does not handle this, can possibly ask client side to help upgrade, or else for now we will send 2x OK_ENTER	in 2 diff ways since the client does support the PATCH below
+			// reply to client OK_ENTER
 			*reply = OK_ENTER
-			// PATCH we hope to rmv this send OK_ENTER by the send one way msg way. but note still need to use the one way msg function upon dequeuing active client and telling next client in queue to OK_ENTER
-			//n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
+
+			// Simulation 3
 			if sim == "3" {
-				dead = true
+				n.Dies()
 				log.Printf("Node %s is now dead", nodeID)
 			}
 		} else {
 			// add to queue
-			dataLock.Lock()
 			data.Queue = append(data.Queue, req)
-			dataLock.Unlock()
+
 			// replicate leader data to slave
 			n.LeaderReplicateDataToSlave()
+
 			// reply to client WAIT
 			*reply = WAIT
 		}
-	case RELEASE:
-		// Handle case of RELEASE of lock for appropriate callers
-		// dataLock.Lock()
-
+	case RELEASE: // Handle case of RELEASE of lock for appropriate callers
 		// This should simulate intermittent failure only once
-		if sim == "2" {
+		if sim == "2" && nodeID == "2" {
 			dead = true
+			isLeader = false
+			LeaderID = 1
 			log.Printf("Node %s is now dead", nodeID)
 			time.Sleep(100 * time.Millisecond)
 			dead = false
+			isLeader = true
+			LeaderID = 2
 			log.Printf("Node %s is now alive", nodeID)
 			sim = "0" // Fail only once
 			time.Sleep(6 * time.Second)
@@ -176,42 +175,47 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 				data.PreviousClient = data.ActiveClient // Save Previous request
 				data.ActiveClient = data.Queue[0]
 				data.Queue = data.Queue[1:]
-				// Send OK_ENTER to the next active client (use SendClientMessage function)
-				if sim != "4" || nodeID == "1" {
-					defer n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
-				}
 			} else {
+				data.PreviousClient = data.ActiveClient // Save Previous request
 				data.ActiveClient = Request{0, 0}
 			}
 			// leader replicates data to slave
 			n.LeaderReplicateDataToSlave()
 
-			// dataLock.Unlock()
-			if sim == "4" && nodeID == "2" {
-				dead = true
+			if sim == "4" && nodeID == "2" || sim == "5" && nodeID == "2" {
+				n.Dies()
 				log.Printf("Node %s is now dead", nodeID)
+
+				if sim == "5" {
+					go func() {
+						time.Sleep(20 * time.Second)
+						dead = false
+						log.Printf("Node %s is now alive", nodeID)
+					}()
+				}
 				return nil
 			}
 			*reply = OK_RELEASE
 			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
-			// dataLock.Unlock()
-		} else { // handle the case when leader goes down before sending OK_RELEASE to client and this new slave becomes leader,
+
+			if data.ActiveClient.ClientID != 0 {
+				// Send OK_ENTER to the next active client (use SendClientMessage function)
+				n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
+			}
+		} else {
+			// handle the case when leader goes down before sending OK_RELEASE to client and this new slave becomes leader,
 			// and client sends RELEASE to this new leader, but this new leader does not have the client in its data.ActiveClient
 			// trivially send the OK_RELEASE command to the lingering client
 
 			*reply = OK_RELEASE
-			log.Printf("Release of lock for Client %d", arg.Request.ClientID)
+			log.Printf("Re-release of lock for Client %d", arg.Request.ClientID)
 
 			// Fault tolerance for failing in between replications
-			// log.Printf("Checking if previous client is waiting for OK_ENTER")
-			// log.Println(data.PreviousClient.ClientID == arg.Request.ClientID && data.PreviousClient.RequestID == arg.Request.RequestID)
-			// log.Println(data.PreviousClient, arg.Request)
-			if data.PreviousClient.ClientID == arg.Request.ClientID && data.PreviousClient.RequestID == arg.Request.RequestID {
+			if data.PreviousClient.ClientID == arg.Request.ClientID && data.PreviousClient.RequestID == arg.Request.RequestID && data.ActiveClient.ClientID != 0 {
 				n.SendClientMessage(&ClientMessage{OK_ENTER, LeaderID, data.ActiveClient})
 			}
 		}
 	}
-	// fmt.Printf("Leader Data: %+v\n", data)
 	return nil
 }
 
@@ -220,23 +224,22 @@ func (n *Node) SendClientMessage(message *ClientMessage) error {
 	clientAddress := "client" + strconv.Itoa(message.Request.ClientID) + ":8080"
 	log.Printf("Connecting to ---  %v", clientAddress)
 
-	for {
-		conn, err := net.Dial("tcp", clientAddress)
-		if err != nil {
-			log.Println(err)
-			// return err
-		}
-		if err == nil {
-			defer conn.Close()
-			_, err = conn.Write([]byte(message.ClientMessageType.String()))
-			if err != nil {
-				return err
-			}
-			log.Printf("Sent OK_ENTER to Client %d", data.ActiveClient.ClientID)
-			return nil
-		}
-		time.Sleep(1 * time.Second)
+	conn, err := net.Dial("tcp", clientAddress)
+	if err != nil {
+		log.Println(err)
+		// return err
 	}
+	if err == nil {
+		defer conn.Close()
+		_, err = conn.Write([]byte(message.ClientMessageType.String()))
+		if err != nil {
+			return err
+		}
+		log.Printf("Sent OK_ENTER to Client %d", data.ActiveClient.ClientID)
+		return nil
+	}
+
+	return nil
 }
 
 // Set up Leader RPC gateway for communication, opening up message channel
@@ -260,27 +263,31 @@ func ServerListener() {
 	}
 }
 
-// util function for leader to call to replicate data to slave
+// Util function for leader to call to replicate data to slave
 // if the replication fails, we assume that the slave went down and we have no choice but to reply back to the client even after failed strong consistency replication
 func (n *Node) LeaderReplicateDataToSlave() bool {
-	if nodeID == "1" {
-		return true
+	var slaveID int
+	if nodeID == "2" {
+		slaveID = 1
+	} else if nodeID == "1" {
+		slaveID = 2
 	}
 
 	// dial slave
-	slave, err := rpc.Dial("tcp", "node"+strconv.Itoa(1)+":8080") // this function only works for original node2 leader replicating to node1 slave
-	if err != nil {
-		log.Println("Failed to connect to slave:", err)
+	slave, err1 := rpc.Dial("tcp", "node"+strconv.Itoa(slaveID)+":8080") // this function only works for original node2 leader replicating to node1 slave
+	if err1 != nil {
+		log.Println("Failed to connect to slave:", err1)
 		return false
 	}
 	defer slave.Close()
 
 	// replicate data to slave
-	dataLock.Lock()
 	var reply Data
-	err = slave.Call("Node.ReplicateData", &data, &reply) // leader passes in his own data, and ensures slave replies with the same data, this signals to leader the data is indeed replicated
-	if err != nil {
-		log.Println(err)
+
+	err2 := slave.Call("Node.ReplicateData", &data, &reply) // leader passes in his own data, and ensures slave replies with the same data, this signals to leader the data is indeed replicated
+
+	if err2 != nil {
+		log.Println("Replication failed,", err2) // Should check if the node is dead for replication
 		return false
 	}
 
@@ -305,7 +312,6 @@ func (n *Node) LeaderReplicateDataToSlave() bool {
 		return false
 	}
 
-	dataLock.Unlock()
 	log.Printf("Slave data replicated correctly in LeaderReplicateToSalve func")
 	return true
 }
@@ -316,17 +322,13 @@ func (n *Node) LeaderReplicateDataToSlave() bool {
 // if node is leader the leader should take arg as nil, and reply with its own leader Data
 func (n *Node) ReplicateData(arg *Data, reply *Data) error {
 	if dead {
-		return nil
+		return fmt.Errorf("Node %s is dead", nodeID)
 	}
-
-	dataLock.Lock()
-	defer dataLock.Unlock()
 
 	if isLeader {
 		// ignore the input nil Data of external function call by slave
 		// reply the slave of my own leader data
 		*reply = data
-		// fmt.Printf("Leader Data: %+v\n", data)
 	}
 
 	if !isLeader {
@@ -334,38 +336,21 @@ func (n *Node) ReplicateData(arg *Data, reply *Data) error {
 		// reply the leader of my updated slave data
 		data = *arg
 		*reply = data
-		fmt.Printf("Replica Data: %+v\n", data)
-		fmt.Printf("Master Data: %+v\n", *arg)
 	}
+	fmt.Printf("Replicated Data: %+v\n", data)
 
 	return nil
 }
 
-// Setter function to set dead or or not dead state of the node
-func (n *Node) SetDead(arg *bool, reply *bool) error {
-	// take in the input from the one who made the funciton call , dont need to reply
-	dataLock.Lock()
-	defer dataLock.Unlock()
-	dead = *arg
-	log.Printf("Node %d is now dead", nodeID)
-	return nil
-}
-
-func (n *Node) AreYouDead(arg *string, reply *bool) error {
-	*reply = dead
-	return nil
-}
-
-// Slave: Poll for data update & handle simple failover procedure
-func SlavePoller() {
+// Slave ONLY: Poll for data update & handle simple failover procedure
+func ServerPoller() {
 	for {
 		time.Sleep(5 * time.Second)
 
-		if dead {
-			return
-		}
-
-		if !isLeader {
+		// Don't poll if it is a leader or not dead
+		if isLeader || dead {
+			continue
+		} else if !isLeader {
 			leader, err := rpc.Dial("tcp", "node"+strconv.Itoa(LeaderID)+":8080")
 			defer leader.Close()
 
@@ -382,12 +367,15 @@ func SlavePoller() {
 				continue
 			}
 
+			// Check if other leader is dead
 			if leaderDead {
 				LeaderID = 1
 				isLeader = true
 
 				// Announcing to all clients that it won the election
-				for i := 1; i <= 10; i++ {
+				// Since we are planning for 2 clients only, there will no announcement to other server that it is the leader
+				// NOTE: Change i to the number of clients whenever necessary
+				for i := 1; i <= clientNum; i++ {
 					client, err := net.Dial("tcp", "client"+strconv.Itoa(i)+":8081")
 					_, err = client.Write([]byte(nodeID))
 					if err != nil {
@@ -400,7 +388,6 @@ func SlavePoller() {
 				break
 			}
 
-			dataLock.Lock()
 			var replicatedData Data
 			err = leader.Call("Node.ReplicateData", &data, &replicatedData)
 
@@ -408,57 +395,57 @@ func SlavePoller() {
 				log.Println(err)
 				continue
 			}
-			log.Println(nodeID, replicatedData, data)
 			data = replicatedData
-
-			dataLock.Unlock()
-
-			// fmt.Printf("Slave Data: %+v\n", data)
 		}
 	}
 }
 
 func main() {
 	nodeID = os.Getenv("NODE_ID")
-	fmt.Printf("Node ID: %v, initialised\n", nodeID)
+	sim = os.Getenv("SIM_NO")
+	clientNumStr := os.Getenv("CLIENT_NUM")
+
+	var err error
+	clientNum, err = strconv.Atoi(clientNumStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("Node ID: %v, initialised\n", nodeID)
 
 	// Set node to isLeader if nodeID is 2
 	isLeader = nodeID == "2"
 	LeaderID = 2
 	data.ActiveClient = Request{0, 0}
+	dead = false
 
 	go ServerListener()
 
-	if !isLeader {
-		go SlavePoller()
-	}
-
-	// Get simulation variable
-	sim = os.Getenv("SIM_NO")
-	switch sim {
-	case "1":
-		// Handle case when sim is 1: normal operations no changes
-		dead = false
-
-	case "2":
-		// // Handle case when sim is 2: intermittent down after granting lock, come back up after slave releases loc
-		// if isLeader {
-		// 	dead = true
-		// 	time.Sleep(6 * time.Second)
-		// 	log.Printf("Node %d is now dead", nodeID)
-		// 	time.Sleep(1 * time.Second)
-		// 	dead = false
-		// 	log.Printf("Node %d is now back alive", nodeID)
-		// }
-
-	case "3":
-		// Handle case when sim is 3: permanent down before granting lock
-	case "4":
-		// Handle case when sim is 4: permanent down whiteboard example
-	default:
-		log.Fatalf("Invalid SIM_NO: %v", sim)
-	}
+	go ServerPoller()
 
 	// Block main goroutine
 	select {}
+}
+
+// Death simulation
+func (n *Node) Dies() {
+	// All simulations are for node 2, so ignore if node 1
+	if nodeID == "1" {
+		return
+	}
+
+	dead = true
+	isLeader = false
+	if nodeID == "0" {
+		LeaderID = 1
+	} else if nodeID == "1" {
+		LeaderID = 0
+	}
+	log.Printf("Node %s is now dead", nodeID)
+}
+
+// Checking if the node is dead
+func (n *Node) AreYouDead(arg *string, reply *bool) error {
+	*reply = dead
+	return nil
 }

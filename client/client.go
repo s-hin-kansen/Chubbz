@@ -216,7 +216,7 @@ func listenForLeaderElection() {
 			}
 			break
 		}
-		fmt.Println("New leader elected: ", output)
+		fmt.Println("New leader elected:", output)
 		leader = "BACKUP_ADDRESS"
 		break
 	}
