@@ -65,6 +65,8 @@ func SendRequest(
 			fmt.Println("Not handled")
 			return
 		}
+	} else {
+		message.LeaderID = 1
 	}
 	// Set message fields
 	message.Request.RequestID = requestID
@@ -117,7 +119,7 @@ func SendRequest(
 		} else {
 			fmt.Println("RPC call succeeded, reply:", reply)
 			if reply == WAIT {
-				fmt.Println("Client", nodeID, "received WAIT from Leader ", message.LeaderID)
+				fmt.Println("Client", nodeID, "received WAIT from Leader", message.LeaderID)
 				receivedEnter := false
 				// // Start go function with timeout to wait for OK_ENTER from server
 				// // If no reply received within 5 seconds, request timeouts and proceeds to retry request
@@ -132,11 +134,11 @@ func SendRequest(
 				listenForServerMessages(&receivedEnter)
 			} else if reply == OK_ENTER {
 				fmt.Println("Entering Critical section")
-				// TODO: Put as a time waiting for global variable, take context from the dockerfile
+
 				time.Sleep(2 * time.Second)
 				SendRequest(1, RELEASE, requestID)
 			} else if reply == OK_RELEASE {
-				fmt.Println("Client", nodeID, "received OK_RELEASE from Leader ", message.LeaderID)
+				fmt.Println("Client", nodeID, "received OK_RELEASE from Leader", message.LeaderID)
 				requestCompleted = requestID
 			} else if reply == 0 {
 				fmt.Println("Error connecting to Server. Trying again")

@@ -1,13 +1,13 @@
 # chubbyGo
 
 Simulation 1:
-Normal & no issues
+Normal & no faults
 
 Simulation 2:
-Intermittent down when client requests, but comes back up after requesting again
+Intermittent down upon client requests, but comes back up soon after
 
 Simulation 3:
-Permanent down after granting lock
+Permanent down after granting FIRST lock
 
 Simulation 4:
-Permanent down AFTER receiving release but before replying RELEASE OK
+Permanent down AFTER receiving release & data replication but before replying RELEASE OK

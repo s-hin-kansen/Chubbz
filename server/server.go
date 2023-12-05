@@ -102,7 +102,8 @@ type Node int
 
 // For Leader to handle requests from clients
 func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error {
-	if dead {
+	if dead || !isLeader {
+		time.Sleep(5 * time.Second)
 		return nil
 	}
 
@@ -162,11 +163,11 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 		if sim == "2" {
 			dead = true
 			log.Printf("Node %s is now dead", nodeID)
-			time.Sleep(3 * time.Second)
+			time.Sleep(100 * time.Millisecond)
 			dead = false
 			log.Printf("Node %s is now alive", nodeID)
 			sim = "0" // Fail only once
-			time.Sleep(5 * time.Second)
+			time.Sleep(6 * time.Second)
 		}
 
 		if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
@@ -184,7 +185,7 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			}
 			// leader replicates data to slave
 			n.LeaderReplicateDataToSlave()
-			log.Printf("Replicated data to slave")
+
 			// dataLock.Unlock()
 			if sim == "4" && nodeID == "2" {
 				dead = true
@@ -364,7 +365,6 @@ func SlavePoller() {
 			return
 		}
 
-		log.Println("ISLEADER", isLeader)
 		if !isLeader {
 			leader, err := rpc.Dial("tcp", "node"+strconv.Itoa(LeaderID)+":8080")
 			defer leader.Close()
@@ -383,6 +383,7 @@ func SlavePoller() {
 			}
 
 			if leaderDead {
+				LeaderID = 1
 				isLeader = true
 
 				// Announcing to all clients that it won the election
@@ -422,7 +423,7 @@ func main() {
 	fmt.Printf("Node ID: %v, initialised\n", nodeID)
 
 	// Set node to isLeader if nodeID is 2
-	isLeader := nodeID == "2"
+	isLeader = nodeID == "2"
 	LeaderID = 2
 	data.ActiveClient = Request{0, 0}
 
