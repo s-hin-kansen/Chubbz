@@ -132,7 +132,8 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			data.ActiveClient = req
 			dataLock.Unlock()
 			// replicate leader data to slave
-			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+			n.LeaderReplicateDataToSlave()
+
 			// reply to client OK_ENTER - TODO: NOTE client side currently does not handle this, can possibly ask client side to help upgrade, or else for now we will send 2x OK_ENTER	in 2 diff ways since the client does support the PATCH below
 			*reply = OK_ENTER
 			// PATCH we hope to rmv this send OK_ENTER by the send one way msg way. but note still need to use the one way msg function upon dequeuing active client and telling next client in queue to OK_ENTER
@@ -147,14 +148,25 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 			data.Queue = append(data.Queue, req)
 			dataLock.Unlock()
 			// replicate leader data to slave
-			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+			n.LeaderReplicateDataToSlave()
 			// reply to client WAIT
 			*reply = WAIT
 		}
 	case RELEASE:
 		// Handle case of RELEASE of lock for appropriate callers
-		// fmt.Println(data.ActiveClient, arg.Request)
 		// dataLock.Lock()
+
+		// This should simulate intermittent failure only once
+		if sim == "2" {
+			dead = true
+			log.Printf("Node %s is now dead", nodeID)
+			time.Sleep(3 * time.Second)
+			dead = false
+			log.Printf("Node %s is now alive", nodeID)
+			sim = "0" // Fail only once
+			time.Sleep(5 * time.Second)
+		}
+
 		if data.ActiveClient.ClientID == arg.Request.ClientID && data.ActiveClient.RequestID == arg.Request.RequestID {
 			// Get next client in queue
 			if len(data.Queue) > 0 {
@@ -166,7 +178,7 @@ func (n *Node) HandleRequest(arg *ClientMessage, reply *ClientMessageType) error
 				data.ActiveClient = Request{0, 0}
 			}
 			// leader replicates data to slave
-			n.LeaderReplicateDataToSlave() // QUESTION: do we need to lock and unlock mutex lock during replication?
+			n.LeaderReplicateDataToSlave()
 			log.Printf("Replicated data to slave")
 			// dataLock.Unlock()
 			if sim == "4" {
@@ -373,15 +385,15 @@ func main() {
 		dead = false
 
 	case "2":
-		// Handle case when sim is 2: intermittent down after granting lock, come back up after slave releases loc
-		if isLeader {
-			dead = true
-			time.Sleep(5 * time.Second)
-			log.Printf("Node %d is now dead", nodeID)
-			time.Sleep(2 * time.Second)
-			dead = false
-			log.Printf("Node %d is now back alive", nodeID)
-		}
+		// // Handle case when sim is 2: intermittent down after granting lock, come back up after slave releases loc
+		// if isLeader {
+		// 	dead = true
+		// 	time.Sleep(6 * time.Second)
+		// 	log.Printf("Node %d is now dead", nodeID)
+		// 	time.Sleep(1 * time.Second)
+		// 	dead = false
+		// 	log.Printf("Node %d is now back alive", nodeID)
+		// }
 
 	case "3":
 		// Handle case when sim is 3: permanent down before granting lock
