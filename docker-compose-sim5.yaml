@@ -1,0 +1,146 @@
+version: '4'
+services:
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - NODE_ID=2
+      - SIM_NO=5
+      - CLIENT_NUM=10
+
+    ports:
+      - "8080:8080"
+
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - NODE_ID=1
+      - SIM_NO=5
+      - CLIENT_NUM=10
+
+    depends_on:
+      - node2
+
+  client1:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=1
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client2:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=2
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+
+    depends_on:
+      - node1
+      - node2
+
+  client3:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=3
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client4:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=4
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client5:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=5
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client6:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=6
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client7:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=7
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client8:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=8
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client9:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=9
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
+
+  client10:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=10
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2

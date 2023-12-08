@@ -1,0 +1,35 @@
+version: '2'
+services:
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - NODE_ID=2
+      - SIM_NO=2
+      - CLIENT_NUM=1
+    ports:
+      - "8080:8080"
+
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    environment:
+      - NODE_ID=1
+      - SIM_NO=2
+      - CLIENT_NUM=1
+    depends_on:
+      - node2
+
+  client1:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    environment:
+      - NODE_ID=1
+      - LEADER_ADDRESS=node2:8080
+      - BACKUP_ADDRESS=node1:8080
+    depends_on:
+      - node1
+      - node2
