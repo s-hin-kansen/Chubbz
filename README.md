@@ -1,4 +1,4 @@
-# chubbz
+# Chubbz
 
 Simulation 1:
 Normal & no faults
