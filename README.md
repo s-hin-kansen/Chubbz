@@ -1,4 +1,4 @@
-# chubbyGo
+# chubbz
 
 Simulation 1:
 Normal & no faults
