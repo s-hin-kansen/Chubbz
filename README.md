@@ -8,6 +8,7 @@ Team 8:
 2. Jon-Taylor Lim [JTZ18](https://github.com/JTZ18)
 3. Sim Wang Lin, [99wanglin](https://github.com/99wanglin)
 4. Shaun Hin, [s-hin-kansen](https://github.com/s-hin-kansen)
+5. Jyotit Kaushal, [jyotit-kaushal](https://github.com/jyotit-kaushal)
 
 # Overview
 
